@@ -18,8 +18,11 @@ type DaMengConnectionManager struct {
 	Username string
 	Password string
 
-	mu         sync.Mutex
-	db         *sql.DB
+	mu sync.Mutex
+	db *sql.DB
+
+	open        func(driverName, dataSourceName string) (*sql.DB, error)
+	ping        func(context.Context, *sql.DB) error
 	initialized bool
 }
 
@@ -62,7 +65,11 @@ func (x *DaMengConnectionManager) Take(ctx context.Context) (*sql.DB, error) {
 			x.Username, x.Password, x.Host, x.Port, x.Database)
 	}
 
-	db, err := sql.Open("dm", dsn)
+	open := x.open
+	if open == nil {
+		open = sql.Open
+	}
+	db, err := open("dm", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +77,11 @@ func (x *DaMengConnectionManager) Take(ctx context.Context) (*sql.DB, error) {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 
-	if err := db.PingContext(ctx); err != nil {
+	ping := x.ping
+	if ping == nil {
+		ping = func(ctx context.Context, db *sql.DB) error { return db.PingContext(ctx) }
+	}
+	if err := ping(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}

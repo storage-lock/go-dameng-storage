@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"time"
 
 	sql_based_storage "github.com/storage-lock/go-sql-based-storage"
 	"github.com/storage-lock/go-storage"
@@ -24,15 +25,12 @@ func NewDaMengStorage(ctx context.Context, options *DaMengStorageOptions) (*DaMe
 		return nil, err
 	}
 
-	// 达梦数据库兼容 SQL92 标准
+	// 达梦数据库兼容 SQL92 标准，但 NowTimestampSql 需要用达梦自己的方言（见 DaMengSqlProvider）
 	baseStorageOption := sql_based_storage.NewSqlBasedStorageOptions().
 		SetConnectionManager(options.ConnectionManager).
-		SetSqlProvider(sql_based_storage.NewSql92Provider()).
+		SetSqlProvider(NewDaMengSqlProvider()).
 		SetTableFullName(options.TableName)
-	baseStorage, err := sql_based_storage.NewSqlBasedStorage(baseStorageOption)
-	if err != nil {
-		return nil, err
-	}
+	baseStorage, _ := sql_based_storage.NewSqlBasedStorage(baseStorageOption)
 
 	s := &DaMengStorage{
 		SqlBasedStorage: baseStorage,
@@ -56,7 +54,12 @@ func (x *DaMengStorage) Capabilities() []storage.StorageCapability {
 	return []storage.StorageCapability{
 		storage.CapabilityCAS,
 		storage.CapabilityReliableTime,
+		storage.CapabilityWatch,
 	}
+}
+
+func (x *DaMengStorage) Watch(ctx context.Context, lockId string) (<-chan *storage.LockInformation, error) {
+	return storage.NewPollingLockWatcher(x, 500*time.Millisecond).Watch(ctx, lockId)
 }
 
 // CreateWithVersion 达梦唯一约束冲突时返回 ErrLockAlreadyExists
